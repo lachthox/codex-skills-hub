@@ -1,4 +1,4 @@
-# Skill Issue Hub
+# The Sorting Vault
 
 Central repository for reusable skills and playbooks.
 
