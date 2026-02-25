@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT_DIR = process.cwd();
+const LIMBO_REVIEW_DIR = path.join("Limbo", "NeedsHumanReview");
 const TAXONOMY_ROOTS = [
   { directory: "BestPractices", label: "BestPractices" },
   { directory: "LanguageSpecific", label: "LanguageSpecific" },
@@ -119,7 +120,7 @@ function buildSkillRecord(skillDirectory, categoryLabel) {
   };
 }
 
-function collectSkills() {
+function collectApprovedSkills() {
   const skills = [];
 
   for (const taxonomyRoot of TAXONOMY_ROOTS) {
@@ -146,13 +147,90 @@ function collectSkills() {
   });
 }
 
+function readScanFindings(skillDirectory) {
+  const findingsPath = path.join(skillDirectory, ".scan-findings.json");
+  if (!fs.existsSync(findingsPath)) {
+    return { riskLevel: "unknown", scanScore: null };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(findingsPath, "utf8"));
+    const scanScore = Number.isFinite(parsed.score_total) ? parsed.score_total : null;
+    return {
+      riskLevel: parsed.risk_level || "unknown",
+      scanScore,
+    };
+  } catch (error) {
+    return { riskLevel: "unknown", scanScore: null };
+  }
+}
+
+function buildLimboRecord(skillDirectory) {
+  const skillFilePath = path.join(skillDirectory, "SKILL.md");
+  let metadata = {};
+  let body = "";
+
+  if (fs.existsSync(skillFilePath)) {
+    const rawContent = fs.readFileSync(skillFilePath, "utf8");
+    const parsed = parseFrontmatter(rawContent);
+    metadata = parsed.metadata;
+    body = parsed.body;
+  }
+
+  const relativeDirectory = path.relative(ROOT_DIR, skillDirectory).replace(/\\/g, "/");
+  const { riskLevel, scanScore } = readScanFindings(skillDirectory);
+
+  return {
+    id: relativeDirectory,
+    name: metadata.name || path.basename(skillDirectory),
+    description: metadata.description || getBodyPreview(body) || "Awaiting human review.",
+    category: "Limbo",
+    limboPath: relativeDirectory,
+    skillFilePath: fs.existsSync(skillFilePath)
+      ? path.relative(ROOT_DIR, skillFilePath).replace(/\\/g, "/")
+      : null,
+    riskLevel,
+    scanScore,
+  };
+}
+
+function collectLimboSkills() {
+  const limboSkills = [];
+  const limboRoot = path.join(ROOT_DIR, LIMBO_REVIEW_DIR);
+  if (!fs.existsSync(limboRoot)) {
+    return limboSkills;
+  }
+
+  for (const entry of safeReadDir(limboRoot)) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const skillDirectory = path.join(limboRoot, entry.name);
+    try {
+      limboSkills.push(buildLimboRecord(skillDirectory));
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return limboSkills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function handler(req, res) {
   try {
-    const skills = collectSkills();
+    const approvedSkills = collectApprovedSkills();
+    const limboSkills = collectLimboSkills();
     res.status(200).json({
       generatedAt: new Date().toISOString(),
-      total: skills.length,
-      skills,
+      totals: {
+        approved: approvedSkills.length,
+        limbo: limboSkills.length,
+      },
+      approvedSkills,
+      limboSkills,
+      total: approvedSkills.length,
+      skills: approvedSkills,
     });
   } catch (error) {
     res.status(500).json({
@@ -162,4 +240,6 @@ function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports.collectSkills = collectSkills;
+module.exports.collectSkills = collectApprovedSkills;
+module.exports.collectApprovedSkills = collectApprovedSkills;
+module.exports.collectLimboSkills = collectLimboSkills;

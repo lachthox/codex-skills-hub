@@ -18,20 +18,20 @@
   <main class="page">
     <header class="hero">
       <p class="eyebrow">THE SORTING VAULT</p>
-      <h1>Skills Out of Limbo</h1>
+      <h1>Skill Review Console</h1>
       <p class="lead">
-        This list includes skills routed into the live taxonomy folders. Anything still in
-        <code>Limbo/NeedsHumanReview</code> is intentionally excluded.
+        Browse routed skills and review limbo candidates. Approve/disapprove actions are saved in
+        your browser so you can triage quickly before applying repo changes.
       </p>
 
       <div class="stats" id="stats">
         <div class="stat-card">
-          <span class="stat-label">Skills</span>
-          <strong id="totalSkills">-</strong>
+          <span class="stat-label">Approved</span>
+          <strong id="totalApproved">-</strong>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Categories</span>
-          <strong id="totalCategories">-</strong>
+          <span class="stat-label">In Limbo</span>
+          <strong id="totalLimbo">-</strong>
         </div>
         <div class="stat-card">
           <span class="stat-label">Generated</span>
@@ -39,6 +39,11 @@
         </div>
       </div>
     </header>
+
+    <section class="tabs" aria-label="Skill views">
+      <button id="tabApproved" class="tab-button is-active" type="button">Out of Limbo</button>
+      <button id="tabLimbo" class="tab-button" type="button">Limbo Review</button>
+    </section>
 
     <section class="controls">
       <label>
@@ -53,6 +58,9 @@
       </label>
     </section>
 
+    <section id="reviewNote" class="review-note" hidden>
+      Approve and disapprove buttons store a local review decision in this browser only.
+    </section>
     <section id="feedback" class="feedback" role="status"></section>
     <section id="grid" class="grid" aria-live="polite"></section>
   </main>

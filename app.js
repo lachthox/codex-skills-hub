@@ -1,20 +1,45 @@
+const DECISION_STORAGE_KEY = "sorting-vault-limbo-decisions-v1";
+
 const state = {
-  skills: [],
+  approvedSkills: [],
+  limboSkills: [],
   filteredSkills: [],
   selectedCategory: "",
   query: "",
   generatedAt: "",
+  activeTab: "approved",
+  limboDecisions: loadDecisions(),
 };
 
 const elements = {
-  totalSkills: document.getElementById("totalSkills"),
-  totalCategories: document.getElementById("totalCategories"),
+  totalApproved: document.getElementById("totalApproved"),
+  totalLimbo: document.getElementById("totalLimbo"),
   generatedAt: document.getElementById("generatedAt"),
   feedback: document.getElementById("feedback"),
   grid: document.getElementById("grid"),
   searchInput: document.getElementById("searchInput"),
   categorySelect: document.getElementById("categorySelect"),
+  tabApproved: document.getElementById("tabApproved"),
+  tabLimbo: document.getElementById("tabLimbo"),
+  reviewNote: document.getElementById("reviewNote"),
 };
+
+function loadDecisions() {
+  try {
+    const raw = localStorage.getItem(DECISION_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveDecisions() {
+  localStorage.setItem(DECISION_STORAGE_KEY, JSON.stringify(state.limboDecisions));
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -36,8 +61,27 @@ function formatGeneratedAt(value) {
   return parsed.toLocaleString();
 }
 
+function activeSkills() {
+  return state.activeTab === "limbo" ? state.limboSkills : state.approvedSkills;
+}
+
+function updateTabs() {
+  const isLimbo = state.activeTab === "limbo";
+  elements.tabApproved.classList.toggle("is-active", !isLimbo);
+  elements.tabLimbo.classList.toggle("is-active", isLimbo);
+  elements.reviewNote.hidden = !isLimbo;
+}
+
 function updateCategoryOptions() {
-  const categories = Array.from(new Set(state.skills.map((skill) => skill.category))).sort((a, b) =>
+  if (state.activeTab === "limbo") {
+    elements.categorySelect.innerHTML = '<option value="">Not used in limbo view</option>';
+    elements.categorySelect.value = "";
+    state.selectedCategory = "";
+    elements.categorySelect.disabled = true;
+    return;
+  }
+
+  const categories = Array.from(new Set(state.approvedSkills.map((skill) => skill.category))).sort((a, b) =>
     a.localeCompare(b)
   );
 
@@ -53,12 +97,13 @@ function updateCategoryOptions() {
 
   elements.categorySelect.value = categories.includes(existingValue) ? existingValue : "";
   state.selectedCategory = elements.categorySelect.value;
+  elements.categorySelect.disabled = false;
 }
 
 function applyFilters() {
   const normalizedQuery = state.query.trim().toLowerCase();
-  state.filteredSkills = state.skills.filter((skill) => {
-    if (state.selectedCategory && skill.category !== state.selectedCategory) {
+  state.filteredSkills = activeSkills().filter((skill) => {
+    if (state.activeTab === "approved" && state.selectedCategory && skill.category !== state.selectedCategory) {
       return false;
     }
 
@@ -66,16 +111,15 @@ function applyFilters() {
       return true;
     }
 
-    const haystack = `${skill.name} ${skill.description} ${skill.folderPath}`.toLowerCase();
+    const haystack = `${skill.name} ${skill.description} ${skill.folderPath || skill.limboPath || ""}`.toLowerCase();
     return haystack.includes(normalizedQuery);
   });
 }
 
-function renderStats(generatedAt) {
-  const categories = new Set(state.skills.map((skill) => skill.category));
-  elements.totalSkills.textContent = String(state.skills.length);
-  elements.totalCategories.textContent = String(categories.size);
-  elements.generatedAt.textContent = formatGeneratedAt(generatedAt);
+function renderStats() {
+  elements.totalApproved.textContent = String(state.approvedSkills.length);
+  elements.totalLimbo.textContent = String(state.limboSkills.length);
+  elements.generatedAt.textContent = formatGeneratedAt(state.generatedAt);
 }
 
 function resourcePills(skill) {
@@ -92,52 +136,122 @@ function resourcePills(skill) {
   if (pills.length === 0) {
     pills.push("single-file");
   }
-  return pills
-    .map((pill) => `<span class="resource-pill">${escapeHtml(pill)}</span>`)
-    .join("");
+  return pills.map((pill) => `<span class="resource-pill">${escapeHtml(pill)}</span>`).join("");
+}
+
+function renderDecisionPill(skillId) {
+  const decision = state.limboDecisions[skillId];
+  if (!decision) {
+    return '<span class="decision-pill decision-pending">Pending</span>';
+  }
+  if (decision === "approve") {
+    return '<span class="decision-pill decision-approve">Approved</span>';
+  }
+  return '<span class="decision-pill decision-disapprove">Disapproved</span>';
+}
+
+function renderLimboCard(skill, index) {
+  const riskText = skill.scanScore === null ? escapeHtml(skill.riskLevel || "unknown") : `${escapeHtml(skill.riskLevel)} (${skill.scanScore})`;
+  const pathText = escapeHtml(skill.limboPath || "");
+  const id = escapeHtml(skill.id || skill.limboPath || skill.name);
+  const decision = state.limboDecisions[skill.id];
+
+  return `
+    <article class="skill-card" style="animation-delay: ${Math.min(index * 30, 240)}ms">
+      <div class="skill-head">
+        <h2 class="skill-title">${escapeHtml(skill.name)}</h2>
+        <span class="category-chip chip-risk">Risk: ${riskText}</span>
+      </div>
+      <p class="skill-description">${escapeHtml(skill.description)}</p>
+      <p class="skill-path">${pathText}</p>
+      <div class="review-actions">
+        ${renderDecisionPill(skill.id)}
+        <button class="decision-button ${decision === "approve" ? "is-selected" : ""}" data-id="${id}" data-action="approve" type="button">Approve</button>
+        <button class="decision-button danger ${decision === "disapprove" ? "is-selected" : ""}" data-id="${id}" data-action="disapprove" type="button">Disapprove</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderApprovedCard(skill, index) {
+  return `
+    <article class="skill-card" style="animation-delay: ${Math.min(index * 30, 240)}ms">
+      <div class="skill-head">
+        <h2 class="skill-title">${escapeHtml(skill.name)}</h2>
+        <span class="category-chip">${escapeHtml(skill.category)}</span>
+      </div>
+      <p class="skill-description">${escapeHtml(skill.description)}</p>
+      <p class="skill-path">${escapeHtml(skill.folderPath)}</p>
+      <div class="resource-row">${resourcePills(skill)}</div>
+    </article>
+  `;
 }
 
 function renderGrid() {
   if (state.filteredSkills.length === 0) {
-    elements.feedback.textContent = "No skills match the current filters.";
+    if (state.activeTab === "limbo") {
+      elements.feedback.textContent = "No limbo skills match the current search.";
+    } else {
+      elements.feedback.textContent = "No routed skills match the current filters.";
+    }
     elements.grid.innerHTML = "";
     return;
   }
 
-  elements.feedback.textContent = `${state.filteredSkills.length} skill(s) visible`;
-  elements.grid.innerHTML = state.filteredSkills
-    .map(
-      (skill, index) => `
-      <article class="skill-card" style="animation-delay: ${Math.min(index * 30, 240)}ms">
-        <div class="skill-head">
-          <h2 class="skill-title">${escapeHtml(skill.name)}</h2>
-          <span class="category-chip">${escapeHtml(skill.category)}</span>
-        </div>
-        <p class="skill-description">${escapeHtml(skill.description)}</p>
-        <p class="skill-path">${escapeHtml(skill.folderPath)}</p>
-        <div class="resource-row">${resourcePills(skill)}</div>
-      </article>
-    `
-    )
-    .join("");
+  const tabLabel = state.activeTab === "limbo" ? "limbo" : "approved";
+  elements.feedback.textContent = `${state.filteredSkills.length} ${tabLabel} skill(s) visible`;
+
+  if (state.activeTab === "limbo") {
+    elements.grid.innerHTML = state.filteredSkills.map(renderLimboCard).join("");
+    return;
+  }
+
+  elements.grid.innerHTML = state.filteredSkills.map(renderApprovedCard).join("");
 }
 
 function refreshView() {
+  updateTabs();
   applyFilters();
-  renderStats(state.generatedAt);
+  renderStats();
   renderGrid();
 }
 
-async function loadSkills() {
-  elements.feedback.textContent = "Loading routed skills...";
+function setActiveTab(tabName) {
+  state.activeTab = tabName === "limbo" ? "limbo" : "approved";
+  updateCategoryOptions();
+  refreshView();
+}
 
+function applyLimboDecision(skillId, action) {
+  const key = String(skillId || "");
+  if (!key) {
+    return;
+  }
+
+  const existing = state.limboDecisions[key];
+  if (existing === action) {
+    delete state.limboDecisions[key];
+  } else {
+    state.limboDecisions[key] = action;
+  }
+  saveDecisions();
+  refreshView();
+}
+
+async function loadSkills() {
+  elements.feedback.textContent = "Loading skills...";
   const response = await fetch("/api/skills");
   if (!response.ok) {
     throw new Error("Request failed");
   }
 
   const payload = await response.json();
-  state.skills = Array.isArray(payload.skills) ? payload.skills : [];
+  state.approvedSkills = Array.isArray(payload.approvedSkills)
+    ? payload.approvedSkills
+    : Array.isArray(payload.skills)
+      ? payload.skills
+      : [];
+  state.limboSkills = Array.isArray(payload.limboSkills) ? payload.limboSkills : [];
   state.generatedAt = payload.generatedAt || "";
   updateCategoryOptions();
   refreshView();
@@ -153,8 +267,29 @@ elements.categorySelect.addEventListener("change", (event) => {
   refreshView();
 });
 
+elements.tabApproved.addEventListener("click", () => {
+  setActiveTab("approved");
+});
+
+elements.tabLimbo.addEventListener("click", () => {
+  setActiveTab("limbo");
+});
+
+elements.grid.addEventListener("click", (event) => {
+  const button = event.target.closest(".decision-button");
+  if (!button) {
+    return;
+  }
+  const skillId = button.getAttribute("data-id");
+  const action = button.getAttribute("data-action");
+  if (!skillId || (action !== "approve" && action !== "disapprove")) {
+    return;
+  }
+  applyLimboDecision(skillId, action);
+});
+
 loadSkills().catch(() => {
   elements.feedback.textContent = "Could not load skills from /api/skills.";
-  elements.totalSkills.textContent = "0";
-  elements.totalCategories.textContent = "0";
+  elements.totalApproved.textContent = "0";
+  elements.totalLimbo.textContent = "0";
 });
